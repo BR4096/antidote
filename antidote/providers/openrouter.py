@@ -7,6 +7,7 @@ Uses LiteLLM's acompletion() for async calls with the "openrouter/" prefix.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 
@@ -50,7 +51,23 @@ class OpenRouterProvider(BaseProvider):
         for msg in messages:
             entry: dict = {"role": msg.role, "content": msg.content or ""}
             if msg.tool_calls is not None:
-                entry["tool_calls"] = msg.tool_calls
+                # Reconstruct OpenAI tool_calls format so LiteLLM can
+                # correctly convert to Anthropic tool_use blocks.
+                entry["tool_calls"] = [
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": (
+                                tc["arguments"]
+                                if isinstance(tc["arguments"], str)
+                                else json.dumps(tc["arguments"])
+                            ),
+                        },
+                    }
+                    for tc in msg.tool_calls
+                ]
             if msg.tool_call_id is not None:
                 entry["tool_call_id"] = msg.tool_call_id
             formatted.append(entry)
