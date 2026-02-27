@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections import defaultdict
 
 from antidote.agent.context import ContextBuilder
 from antidote.channels.base import IncomingMessage
+from antidote.config import Config
 from antidote.memory.store import MemoryStore
 from antidote.providers.base import BaseProvider, Message
 from antidote.tools.base import ToolResult
@@ -37,6 +39,47 @@ _TRIVIAL_PATTERNS = frozenset({
 def _is_trivial(text: str) -> bool:
     """Check if a message is trivial and not worth saving to memory."""
     return text.strip().lower().rstrip("!.?") in _TRIVIAL_PATTERNS
+
+
+# Keywords that signal a complex query requiring the full model
+_COMPLEXITY_KEYWORDS = re.compile(
+    r"\b(?:draft|write|analyze|compare|plan|strategy|review|create|build|design"
+    r"|explain|outline|evaluate|summarize|refactor|debug|help me|what should)\b",
+    re.IGNORECASE,
+)
+
+
+def _classify_query(text: str) -> str:
+    """Classify a user query as 'fast' (Haiku) or 'full' (Sonnet).
+
+    Routes to Haiku when the message is trivial or short without complexity
+    signals. Routes to Sonnet for anything requiring real reasoning.
+    """
+    if _is_trivial(text):
+        return "fast"
+
+    # Code fences → full model
+    if "```" in text:
+        return "full"
+
+    # Long messages → user invested effort → full model
+    if len(text) > 200:
+        return "full"
+
+    # Multiple sentences → full model
+    sentence_endings = len(re.findall(r"[.?!]", text))
+    if sentence_endings >= 2:
+        return "full"
+
+    # Complexity keywords → full model
+    if _COMPLEXITY_KEYWORDS.search(text):
+        return "full"
+
+    # Short, simple message without complexity signals → fast model
+    if len(text) < 80:
+        return "fast"
+
+    return "full"
 
 
 class AgentLoop:
@@ -68,6 +111,25 @@ class AgentLoop:
         self._tools.register(_SaveMemoryTool(self._memory))
         self._tools.register(_SearchMemoryTool(self._memory))
         self._tools.register(_ForgetMemoryTool(self._memory))
+
+    def _select_model(self, text: str) -> str | None:
+        """Pick the right model tier based on query complexity.
+
+        Returns a model string for the provider, or None to use the default.
+        """
+        config = Config()
+        routing = config.get("routing")
+        if routing is None or not routing.enabled:
+            return None
+
+        tier = _classify_query(text)
+        if tier == "fast":
+            model = routing.fast_model
+        else:
+            model = routing.full_model  # None means provider default
+
+        logger.info("Routing → %s (model=%s)", tier, model or "provider-default")
+        return model
 
     def _get_history(self, chat_id: str) -> list[Message]:
         """Get conversation history for a chat, capped at MAX_HISTORY."""
@@ -107,11 +169,15 @@ class AgentLoop:
         # Track user message in history
         self._append_history(chat_id, Message(role="user", content=user_text))
 
+        # Select model tier based on query complexity
+        selected_model = self._select_model(user_text)
+
         # LLM call loop with tool support
         response_text = await self._run_llm_loop(
             messages=messages,
             tool_defs=tool_defs,
             chat_id=chat_id,
+            model=selected_model,
         )
 
         # Track assistant response in history
@@ -128,15 +194,18 @@ class AgentLoop:
         messages: list[Message],
         tool_defs: list,
         chat_id: str,
+        model: str | None = None,
     ) -> str:
         """Call the LLM, process tool calls, repeat until text response or max rounds."""
         current_messages = list(messages)
+        current_model = model
 
         for round_num in range(MAX_TOOL_ROUNDS):
             try:
                 response = await self._provider.chat(
                     messages=current_messages,
                     tools=tool_defs if tool_defs else None,
+                    model=current_model,
                 )
             except Exception as e:
                 logger.exception("LLM call failed (round %d)", round_num)
@@ -145,6 +214,25 @@ class AgentLoop:
             # If no tool calls, we have the final text response
             if not response.tool_calls:
                 return response.content or "I'm not sure how to respond to that."
+
+            # Upgrade: if Haiku returned tool calls, switch to Sonnet for
+            # remaining rounds — Sonnet is better at synthesizing tool outputs
+            if current_model and current_model != model:
+                pass  # already upgraded
+            elif current_model is not None:
+                config = Config()
+                full_model = config.get("routing", {}).get("full_model")
+                if full_model is None:
+                    full_model_resolved = None  # provider default (Sonnet)
+                else:
+                    full_model_resolved = full_model
+                if current_model != full_model_resolved:
+                    logger.info(
+                        "Upgrading model for tool synthesis: %s → %s",
+                        current_model,
+                        full_model_resolved or "provider-default",
+                    )
+                    current_model = full_model_resolved
 
             # Process tool calls
             assistant_msg = Message(
@@ -176,6 +264,7 @@ class AgentLoop:
             response = await self._provider.chat(
                 messages=current_messages,
                 tools=None,  # No tools -- force text response
+                model=current_model,
             )
             return response.content or "I've completed the tool operations but couldn't formulate a response."
         except Exception as e:

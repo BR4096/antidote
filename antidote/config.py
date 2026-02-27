@@ -45,6 +45,11 @@ DEFAULTS: dict[str, Any] = {
         "max_context_memories": 10,
     },
     "workspace": "~/.antidote/workspace",
+    "routing": {
+        "enabled": True,
+        "fast_model": "anthropic/claude-haiku-4.5",
+        "full_model": None,  # None = use provider default (Sonnet 4)
+    },
     "identity": {
         "soul": "workspace/SOUL.md",
         "agents": "workspace/AGENTS.md",
