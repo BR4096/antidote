@@ -90,7 +90,9 @@ workspace/
 ├── About_Projects/      # LearnWell business and campaigns (5 files, 113KB)
 ├── reference/           # Quick-reference docs (4 files, 4KB)
 ├── projects/            # Current work (2 files, 0.9KB)
-└── templates/           # Reusable templates (3 files)
+├── templates/           # Reusable templates (3 files)
+├── in/                  # Auto-saved user inputs (>500 chars, gitignored)
+└── out/                 # Auto-saved structured responses (>12 lines, gitignored)
 ```
 
 Identity files total ~7.2KB (~1,800 tokens of 8,000 budget). Reference files (193KB on disk) cost zero tokens unless the bot reads them via tool call.
