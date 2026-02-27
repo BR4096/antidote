@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import time
 from collections import defaultdict
 
 from antidote.agent.context import ContextBuilder
@@ -82,6 +84,63 @@ def _classify_query(text: str) -> str:
     return "full"
 
 
+# File extensions we can safely read as text
+_TEXT_EXTENSIONS = frozenset({
+    ".txt", ".csv", ".md", ".json", ".xml", ".html", ".yml", ".yaml",
+    ".py", ".js", ".ts", ".sh", ".toml", ".ini", ".cfg", ".log",
+    ".tsv", ".sql", ".env", ".tex", ".rst",
+})
+
+# Max chars to read from an attached file (avoid blowing context budget)
+_MAX_FILE_CHARS = 12_000
+
+
+def _read_attachment(path: str) -> str | None:
+    """Read a text-based attachment and return its content, or None."""
+    if not os.path.isfile(path):
+        return None
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in _TEXT_EXTENSIONS:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read(_MAX_FILE_CHARS)
+        if len(content) == _MAX_FILE_CHARS:
+            content += "\n... [truncated — file exceeds 12,000 characters]"
+        return content
+    except Exception:
+        logger.debug("Could not read attachment %s", path, exc_info=True)
+        return None
+
+
+# Minimum lines for a response to qualify for auto-save
+_AUTO_SAVE_MIN_LINES = 12
+
+# Structural markers that indicate a saveable document (not casual chat)
+_STRUCTURAL_RE = re.compile(
+    r"^#{1,3}\s|^\|.*\||^```|^[-*]\s.*:.*|^\d+\.\s",
+    re.MULTILINE,
+)
+
+
+def _should_auto_save(text: str) -> bool:
+    """Return True if the response is structured content worth saving to a file."""
+    if text.count("\n") < _AUTO_SAVE_MIN_LINES:
+        return False
+    # Need at least 3 structural markers (headers, tables, lists with colons, code fences)
+    return len(_STRUCTURAL_RE.findall(text)) >= 3
+
+
+def _slugify(text: str, max_len: int = 50) -> str:
+    """Turn a query into a filename-safe slug."""
+    # Take first meaningful words, drop noise
+    words = re.sub(r"[^\w\s-]", "", text.lower()).split()
+    noise = {"the", "a", "an", "and", "or", "for", "to", "of", "in", "my", "me", "i"}
+    words = [w for w in words if w not in noise][:6]
+    slug = "-".join(words) if words else "response"
+    return slug[:max_len]
+
+
 class AgentLoop:
     """The brain of Antidote. Processes messages through LLM with tool support.
 
@@ -131,6 +190,49 @@ class AgentLoop:
         logger.info("Routing → %s (model=%s)", tier, model or "provider-default")
         return model
 
+    def _auto_save_input(self, user_text: str) -> None:
+        """Save large user inputs (data pastes, CSV, etc.) to workspace/in/.
+
+        Preserves data that would otherwise be lost on restart or truncated
+        in memory summaries.
+        """
+        config = Config()
+        workspace = os.path.expanduser(config.workspace)
+        in_dir = os.path.join(workspace, "in")
+        os.makedirs(in_dir, exist_ok=True)
+
+        datestamp = time.strftime("%Y%m%d-%H%M")
+        filename = f"user-input-{datestamp}.md"
+        filepath = os.path.join(in_dir, filename)
+
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(user_text)
+            logger.info("Auto-saved user input to %s (%d chars)", filename, len(user_text))
+        except Exception:
+            logger.debug("Auto-save of user input failed for %s", filepath, exc_info=True)
+
+    def _auto_save_response(self, response_text: str, query: str) -> str:
+        """Save a structured response to workspace/out/ and append a notice."""
+        config = Config()
+        workspace = os.path.expanduser(config.workspace)
+        out_dir = os.path.join(workspace, "out")
+        os.makedirs(out_dir, exist_ok=True)
+
+        slug = _slugify(query)
+        datestamp = time.strftime("%Y%m%d-%H%M")
+        filename = f"{slug}-{datestamp}.md"
+        filepath = os.path.join(out_dir, filename)
+
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(response_text)
+            logger.info("Auto-saved response to %s (%d chars)", filename, len(response_text))
+            return response_text + f"\n\n📎 _Saved to workspace/out/{filename}_"
+        except Exception:
+            logger.debug("Auto-save failed for %s", filepath, exc_info=True)
+            return response_text
+
     def _get_history(self, chat_id: str) -> list[Message]:
         """Get conversation history for a chat, capped at MAX_HISTORY."""
         return self._history[chat_id]
@@ -156,6 +258,35 @@ class AgentLoop:
         chat_id = incoming.chat_id
         user_text = incoming.text
 
+        # If the message includes document attachments, read their content
+        # and append to the user text so the LLM can see the data.
+        if incoming.media:
+            for item in incoming.media:
+                if item.get("type") == "document":
+                    file_path = item.get("url", "")
+                    file_name = item.get("caption", os.path.basename(file_path))
+                    content = _read_attachment(file_path)
+                    if content:
+                        user_text = (
+                            f"{user_text}\n\n"
+                            f"--- Attached file: {file_name} ---\n"
+                            f"{content}\n"
+                            f"--- End of {file_name} ---"
+                        )
+                        logger.info(
+                            "Attached file injected: %s (%d chars)",
+                            file_name, len(content),
+                        )
+                    else:
+                        logger.warning(
+                            "Could not read attachment: %s (unsupported type or missing)",
+                            file_path,
+                        )
+
+        # Auto-save large user inputs (data pastes, CSV rows, etc.) to workspace/in/
+        if len(user_text) > 500 and user_text.count("\n") >= 5:
+            self._auto_save_input(user_text)
+
         # Get conversation history for this chat
         history = self._get_history(chat_id)
 
@@ -179,6 +310,10 @@ class AgentLoop:
             chat_id=chat_id,
             model=selected_model,
         )
+
+        # Auto-save structured responses (>12 lines with headers/tables) to workspace/out/
+        if _should_auto_save(response_text):
+            response_text = self._auto_save_response(response_text, user_text)
 
         # Track assistant response in history
         self._append_history(chat_id, Message(role="assistant", content=response_text))
@@ -306,10 +441,14 @@ class AgentLoop:
             return json.dumps({"error": f"Tool execution failed: {e}"})
 
     async def _save_conversation_summary(self, user_text: str, response_text: str) -> None:
-        """Save a brief conversation summary to memory."""
-        # Keep the summary concise
-        user_preview = user_text[:200]
-        response_preview = response_text[:200]
+        """Save a conversation summary to memory.
+
+        Uses up to 1000 chars each for user input and response to preserve
+        meaningful data (CSV rows, structured content, etc.) without bloating
+        the memory store.
+        """
+        user_preview = user_text[:1000]
+        response_preview = response_text[:1000]
         summary = f"User asked: {user_preview}\nAssistant responded: {response_preview}"
         try:
             await self._memory.save(summary, category="conversation")
