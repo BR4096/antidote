@@ -30,6 +30,10 @@ Personal AI assistant built in Python (~3,000 lines). Runs on Mac, talks via Tel
 - [x] Bot auto-restarts via start.sh (launchd-managed)
 - [x] Haiku/Sonnet model routing — simple queries go to Haiku (fast/cheap), complex queries to Sonnet
 - [x] Model routing verified end-to-end (classifier + live API calls to both models)
+- [x] Telegram file attachments: text files (CSV, MD, etc.) injected into LLM context
+- [x] Workspace in/out folders for file exchange bypassing Telegram limits
+- [x] Auto-save: structured responses (>12 lines) → `workspace/out/`, large inputs (>500 chars) → `workspace/in/`
+- [x] Memory summary increased from 200→1000 chars to preserve data in conversation summaries
 
 ### Not Yet Done
 - [ ] Test reference-aware behavior in Telegram (content drafting, outreach questions, visibility queries)
