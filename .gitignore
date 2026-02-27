@@ -12,3 +12,9 @@ config.json
 audit.log
 *.log
 .DS_Store
+
+# Workspace in/out content (user-specific, auto-generated)
+workspace/in/*
+workspace/out/*
+!workspace/in/.gitkeep
+!workspace/out/.gitkeep
