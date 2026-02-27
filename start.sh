@@ -7,16 +7,16 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Check Python
-if ! command -v python3 &> /dev/null; then
-    echo "Error: Python 3 is required. Install from python.org"
-    exit 1
+# Use Homebrew Python (not macOS system Python 3.9)
+PYTHON="/opt/homebrew/bin/python3"
+if [ ! -x "$PYTHON" ]; then
+    PYTHON="$(command -v python3)"
 fi
 
 # Check Python version (3.11+ required)
-PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-PYTHON_MAJOR=$(python3 -c 'import sys; print(sys.version_info.major)')
-PYTHON_MINOR=$(python3 -c 'import sys; print(sys.version_info.minor)')
+PYTHON_VERSION=$("$PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+PYTHON_MAJOR=$("$PYTHON" -c 'import sys; print(sys.version_info.major)')
+PYTHON_MINOR=$("$PYTHON" -c 'import sys; print(sys.version_info.minor)')
 if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]); then
     echo "Error: Python 3.11+ is required (found $PYTHON_VERSION)"
     exit 1
@@ -25,7 +25,7 @@ fi
 # Check venv exists, create if not
 if [ ! -d ".venv" ]; then
     echo "Creating virtual environment..."
-    python3 -m venv .venv
+    "$PYTHON" -m venv .venv
     source .venv/bin/activate
     pip install -e .
 else
