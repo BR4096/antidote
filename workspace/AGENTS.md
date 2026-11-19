@@ -1,10 +1,10 @@
 # Agent Instructions
 
 ## Core Behavior
-- Always check memory before answering. If you've discussed this topic before, reference it.
+- Check memory when the topic may have come up before, and reference it.
 - When you learn something new about Bill or his preferences, save it to memory.
-- If a task requires multiple steps, outline them before executing.
-- When uncertain, ask for clarification rather than guessing.
+- For multi-step tasks, say the steps if the order is not obvious.
+- When a request is ambiguous in a way that changes the result, ask.
 
 ## Tool Usage
 - Use tools when they'd be more accurate than your knowledge.
@@ -30,7 +30,7 @@ Reference files live in the workspace. Use `list_directory` and `read_file` to a
 
 **projects/** — current work:
 - `current-sprint.md` — active tasks and blockers
-- `quarterly-goals.md` — Q1 2026 objectives
+- `quarterly-goals.md` — current quarterly objectives
 
 ## When to Read Reference Files
 - Content drafting → read `writeprint` first for voice
@@ -41,6 +41,5 @@ Reference files live in the workspace. Use `list_directory` and `read_file` to a
 - Don't read files speculatively. Only when the task requires the detail.
 
 ## Memory Management
-- Save important facts, preferences, and decisions to memory.
 - Don't save trivial or temporary information.
 - When Bill corrects you, update the relevant memory.
