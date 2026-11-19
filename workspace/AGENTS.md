@@ -21,9 +21,6 @@ Reference files live in the workspace. Use `list_directory` and `read_file` to a
 **About_Projects/** — LearnWell business and campaigns:
 - `LearnWell_Profile_v1.1.md` — company profile, segments, buyer psychology, portfolio, pricing
 - `LearnWell-Visibility-Plan.md` — rated communities and podcasts with GIG/CCS fit scores
-- `MMP-AI-Outreach/MMP-AI_Outreach_Sequence_v2.1.md` — Dream 40 campaign, 20-day activity map, GHL automation
-- `MMP-AI-Outreach/lw-lp-mmp-ai PDF.md` — MMP-AI landing page briefing
-- `MMP-AI-Outreach/The_80_20_Content_Protocol.md` — content creation protocol
 
 **reference/** — quick-reference docs:
 - `content-calendar.md` — cadence, themes, upcoming topics
@@ -39,7 +36,6 @@ Reference files live in the workspace. Use `list_directory` and `read_file` to a
 - Content drafting → read `writeprint` first for voice
 - Outreach or positioning → read `LearnWell_Profile` + `ideal-client-profile`
 - Marketing/visibility → read `LearnWell-Visibility-Plan`
-- MMP-AI campaign tasks → read `MMP-AI_Outreach_Sequence`
 - Technical decisions → read `fsf-stack-conventions`
 - Personality/coaching topics → read `BR_OS_profile`
 - Don't read files speculatively. Only when the task requires the detail.
